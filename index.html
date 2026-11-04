@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Car Player</title><script src="https://accounts.google.com/gsi/client" async></script>
+<style>body{margin:0;font:18px -apple-system,sans-serif;background:#111;color:#eee}header{position:sticky;top:0;background:#111;padding:10px}
+.tabs button{font-size:16px;padding:10px 12px;margin:2px;border-radius:10px;border:0;background:#333;color:#eee}.tabs .on{background:#1db954;color:#000}
+#ctl{display:flex;gap:10px;align-items:center;margin-top:8px}#ctl button{font-size:30px;width:70px;height:60px;border-radius:14px;border:0;background:#222;color:#fff}
+#now{flex:1;font-size:15px}li{list-style:none;display:flex;align-items:center;border-bottom:1px solid #222;padding:6px 10px}li span{flex:1;padding:8px 0}
+li button{width:48px;height:48px;font-size:22px;border:0;border-radius:10px;margin-left:6px;background:#2a2a2a;color:#fff}li.k span:before{content:"✓ ";color:#1db954}li.p{background:#1d2a1f}
+ul{padding:0;margin:0}#signin{font-size:22px;padding:18px 28px;margin:40px auto;display:block;border-radius:14px;border:0;background:#1db954}</style></head><body>
+<header><div class="tabs" id="tabs"></div><div id="ctl"><button id="pv">⏮</button><button id="pp">▶︎</button><button id="nx">⏭</button><div id="now">Sign in to load your songs from Google Drive.</div></div></header>
+<button id="signin">Sign in with Google</button><ul id="list"></ul><audio id="a" playsinline></audio>
+<script>
+const CLIENT_ID='__CLIENT_ID__';
+const SCOPES='https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
+const EXCL=/v12recipe|v12blend|v12clean|saucer[ _-]*fix|snippet|reject|\bproof\b|\bfail|_FAIL|preview|\bclip\b|\bA-B\b|\bAB_|\btest\b|interim|premaster|alternate/i;
+const VOC=/voice master|brando[ _-]?sung|my ?voice|newvoice|\brvc\b|word clarity|native|partner|voice ?memo|vocal ?polish|full ?stack|brandon vocal|^brandon byars\s*-/i, VNO=/marina|suno[ _-]?only|character/i;
+const MAS=/final|master|reisei|reisi|slam|\balbum\b|full ?stack|the single/i, BAD=/bad|saucer|muffle/i;
+let tok=null,exp=0,client,T=[],fb={rej:{},keep:{}},fbId=null,tab='All',cur=-1,view=[],urls={};
+const $=id=>document.getElementById(id),a=$('a');
+function title(n){let s=n.replace(/\.wav$/i,'').replace(/^\d{4}-\d\d-\d\d\s*-\s*|^\d+\s*-\s*/,'').replace(/^(brandon byars|brandowithabanjo)\s*[-—]\s*/i,'');s=s.split(/\s+-\s+|\s*\[|_v\d|_PassA|_stem|\s+—\s+|\s*\(/)[0].replace(/_/g,' ').trim();return s||n}
+function getTok(prompt){return new Promise((res,rej)=>{client.callback=r=>r.error?rej(r):(tok=r.access_token,exp=Date.now()+(r.expires_in-60)*1e3,localStorage.signed=1,res(tok));client.requestAccessToken({prompt:prompt?'consent':''})})}
+async function api(u,o={}){if(!tok||Date.now()>exp)await getTok(false);o.headers=Object.assign({Authorization:'Bearer '+tok},o.headers||{});const r=await fetch(u,o);if(r.status==401){tok=null;return api(u,o)}if(!r.ok)throw new Error(r.status);return r}
+async function loadFb(){const r=await(await api('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27carplayer.json%27&fields=files(id)')).json();
+ if(r.files.length){fbId=r.files[0].id;fb=await(await api(`https://www.googleapis.com/drive/v3/files/${fbId}?alt=media`)).json()}}
+async function saveFb(){const b=JSON.stringify(fb);if(fbId){await api(`https://www.googleapis.com/upload/drive/v3/files/${fbId}?uploadType=media`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:b});return}
+ const fd=new FormData();fd.append('m',new Blob([JSON.stringify({name:'carplayer.json',parents:['appDataFolder']})],{type:'application/json'}));fd.append('f',new Blob([b],{type:'application/json'}));
+ fbId=(await(await api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',body:fd})).json()).id}
+async function loadList(){let pt='',out=[];do{const q=encodeURIComponent("name contains '.wav' and trashed=false");
+ const r=await(await api(`https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=1000&fields=nextPageToken,files(id,name,size,modifiedTime)&orderBy=modifiedTime desc${pt?'&pageToken='+pt:''}`)).json();out.push(...r.files);pt=r.nextPageToken}while(pt);
+ const seen=new Set();T=[];for(const f of out){if(+f.size<9e6||EXCL.test(f.name))continue;const t=title(f.name),key=t.toLowerCase()+'|'+f.size;if(seen.has(key))continue;seen.add(key);
+ T.push({id:f.id,t:t+' ('+f.modifiedTime.slice(5,10)+')',v:VOC.test(f.name)&&!VNO.test(f.name),m:MAS.test(f.name)&&!BAD.test(f.name)})}}
+function tabs(){$('tabs').innerHTML=['All','My Vocals','Final Masters','Rejected'].map(x=>`<button class="${x==tab?'on':''}">${x}</button>`).join('');[...$('tabs').children].forEach(b=>b.onclick=()=>{tab=b.textContent;render()})}
+function render(){tabs();view=T.filter(x=>tab=='Rejected'?fb.rej[x.id]:!fb.rej[x.id]&&(tab=='All'||(tab=='My Vocals'?x.v:x.m)));
+ $('list').innerHTML=view.map((x,i)=>`<li class="${fb.keep[x.id]?'k':''} ${T[cur]&&T[cur].id==x.id?'p':''}"><span data-i="${i}">${x.t.replace(/</g,'&lt;')}</span>${tab=='Rejected'?`<button data-r="${x.id}">↺</button>`:`<button data-k="${x.id}">✓</button><button data-x="${x.id}">✕</button>`}</li>`).join('')}
+$('list').onclick=async e=>{const d=e.target.dataset;if(d.i!=null)return play(T.indexOf(view[+d.i]));
+ if(d.k){fb.keep[d.k]?delete fb.keep[d.k]:fb.keep[d.k]=1}if(d.x){fb.rej[d.x]=1;delete fb.keep[d.x];if(T[cur]&&T[cur].id==d.x)next(1)}if(d.r)delete fb.rej[d.r];render();saveFb().catch(e=>alert('Save failed '+e))};
+async function blob(id){if(!urls[id])urls[id]=api(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`).then(r=>r.blob()).then(b=>URL.createObjectURL(b));return urls[id]}
+async function play(i){if(i<0)return;cur=i;const x=T[i];$('now').textContent='Loading… '+x.t;render();a.src=await blob(x.id);if(T[cur]!==x)return;a.play();$('now').textContent=x.t;
+ if('mediaSession'in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:x.t,artist:'Brando With A Banjo'});
+ for(const k in urls)if(k!=x.id&&!(view.slice(view.indexOf(x)+1,view.indexOf(x)+2).some(y=>y.id==k))){urls[k].then(URL.revokeObjectURL);delete urls[k]}
+ const n=view[view.indexOf(x)+1];if(n)blob(n.id)}
+function next(d){const p=view.findIndex(y=>T[cur]&&y.id==T[cur].id);const n=view[p+d]||view[0];if(n)play(T.indexOf(n))}
+a.onended=()=>next(1);$('nx').onclick=()=>next(1);$('pv').onclick=()=>next(-1);$('pp').onclick=()=>cur<0?next(1):a.paused?a.play():a.pause();
+a.onplay=()=>$('pp').textContent='⏸';a.onpause=()=>$('pp').textContent='▶︎';
+if('mediaSession'in navigator){const m=navigator.mediaSession;m.setActionHandler('play',()=>a.play());m.setActionHandler('pause',()=>a.pause());m.setActionHandler('nexttrack',()=>next(1));m.setActionHandler('previoustrack',()=>next(-1))}
+async function start(prompt){try{await getTok(prompt);$('signin').style.display='none';$('now').textContent='Loading your songs…';await Promise.all([loadList(),loadFb()]);$('now').textContent=T.length+' songs. Tap one.';render()}catch(e){$('signin').style.display='block';$('now').textContent='Sign in to load your songs.'}}
+$('signin').onclick=()=>start(!localStorage.signed);
+window.onload=()=>{client=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:()=>{}});if(CLIENT_ID.startsWith('__'))$('now').textContent='Setup pending: Google client ID not added yet.'};
+</script></body></html>
